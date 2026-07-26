@@ -80,10 +80,15 @@ def compile_plan(metric: Metric, plan: dict, user_ctx: dict) -> Compiled:
     if unknown:
         raise PlanError(f"未声明的维度 {unknown};该指标可用维度: {sorted(metric.dimensions)}")
 
-    # 敏感维度权限(11 章):L4 一律拒出;L3 需白名单,结果掩码
+    # 敏感维度权限(11 章):L4 一律拒出;L3 需白名单,结果掩码。
+    # 关键:检查覆盖所有对敏感维度的引用——输出列、过滤字段、排序字段。
+    # 作为 WHERE 条件的敏感字段(如 WHERE cust_no='x')能精确定位单客户,
+    # 是与输出同等的越权路径,必须同样拦截(宁严勿松)。
     masked = []
     whitelist = set(user_ctx.get("sensitive_whitelist") or [])
-    for d in dims_req:
+    filter_fields = [f.get("field") for f in (plan.get("filters") or [])]
+    order_fields = [ob.get("field") for ob in (plan.get("order_by") or [])]
+    for d in dims_req:                       # 输出列:通过白名单后掩码
         sens = metric.dimensions[d].sensitivity
         if sens == "L4":
             raise PermissionDenied(f"维度 {d} 为 L4 级,任何场景拒绝输出")
@@ -91,6 +96,15 @@ def compile_plan(metric: Metric, plan: dict, user_ctx: dict) -> Compiled:
             if d not in whitelist:
                 raise PermissionDenied(f"维度 {d} 为 L3 敏感维度,不在你的白名单内")
             masked.append(d)
+    for d in set(filter_fields) | set(order_fields):   # 过滤/排序引用:拒绝级,不输出故不掩码
+        dim = metric.dimensions.get(d)
+        if dim is None:
+            continue                         # 未声明字段由后续 PlanError 兜底
+        if dim.sensitivity == "L4":
+            raise PermissionDenied(f"字段 {d} 为 L4 级,不得用于过滤/排序")
+        if dim.sensitivity == "L3" and d not in whitelist:
+            raise PermissionDenied(
+                f"字段 {d} 为 L3 敏感维度,用于过滤/排序需在你的白名单内")
 
     # SELECT 列:维度按 plan 顺序(输出列序是 plan 的一部分)+ 指标表达式
     select_cols = [f"{metric.dimensions[d].column} AS {d}" for d in dims_req]

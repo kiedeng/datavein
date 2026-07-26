@@ -61,3 +61,65 @@ def test_executor_rejects_blacklist():
 def test_executor_rejects_missing_limit():
     with pytest.raises(ExecutionRejected, match="LIMIT"):
         validate_select_only("SELECT a FROM dws.t")
+
+
+# ---- 安全走查回归(2026-07 专项审查发现的三处越权路径) ----
+
+def test_l3_sensitive_dim_as_filter_refused():
+    """漏洞:L3 敏感维度作为 WHERE 过滤字段绕过白名单,可精确定位单客户。"""
+    plan = {"metric": "total_credit_amt", "dimensions": ["org_no"],
+            "filters": [{"field": "cust_no", "op": "eq", "value": "C001"}]}
+    with pytest.raises(PermissionDenied, match="L3"):
+        compile_plan(repo.get("total_credit_amt"), plan,
+                     {"user_id": "u", "user_orgs": ["O01"]})   # 无白名单
+
+
+def test_l3_sensitive_dim_as_filter_allowed_with_whitelist():
+    plan = {"metric": "total_credit_amt", "dimensions": ["org_no"],
+            "filters": [{"field": "cust_no", "op": "eq", "value": "C001"}]}
+    c = compile_plan(repo.get("total_credit_amt"), plan,
+                     {"user_id": "u", "user_orgs": ["O01"],
+                      "sensitive_whitelist": ["cust_no"]})
+    assert c.is_customer_query          # 白名单内放行但标记按客户查询(合规追查)
+
+
+def test_l4_sensitive_dim_as_order_refused():
+    m = Metric(metric="m", cn_name="x", caliber="x", version=1,
+               base_table="t.t", expression="SUM(base.v)",
+               dimensions={"org": Dimension("org", "base.org"),
+                           "id_card": Dimension("id_card", "base.id_card",
+                                                sensitivity="L4")},
+               row_policy="base.org IN :user_orgs")
+    plan = {"metric": "m", "dimensions": ["org"],
+            "order_by": [{"field": "id_card", "dir": "asc"}]}
+    with pytest.raises(PermissionDenied, match="L4"):
+        compile_plan(m, plan, {"user_orgs": ["O01"],
+                               "sensitive_whitelist": ["id_card"]})
+
+
+def test_executor_rejects_for_update():
+    with pytest.raises(ExecutionRejected, match="加锁"):
+        validate_select_only("SELECT a FROM dws.t LIMIT 10 FOR UPDATE")
+
+
+def test_executor_rejects_lock_in_share_mode():
+    with pytest.raises(ExecutionRejected, match="加锁"):
+        validate_select_only("SELECT a FROM dws.t LIMIT 10 LOCK IN SHARE MODE")
+
+
+def test_executor_rejects_select_into_var():
+    # SELECT ... INTO @var 可被 sqlglot 解析,须命中 into 拒绝分支
+    with pytest.raises(ExecutionRejected, match="数据外带"):
+        validate_select_only("SELECT a INTO @v FROM dws.t LIMIT 1")
+
+
+def test_executor_rejects_into_outfile():
+    # INTO OUTFILE 被 sqlglot 判为无法解析,同样落到拒绝(纵深:两道都拦)
+    with pytest.raises(ExecutionRejected):
+        validate_select_only("SELECT a INTO OUTFILE '/tmp/x' FROM dws.t")
+
+
+def test_executor_blacklist_case_insensitive():
+    # 大小写变体不得绕过黑名单
+    with pytest.raises(ExecutionRejected, match="黑名单"):
+        validate_select_only("SELECT * FROM ODS.ODS_T_CUST_SECRET LIMIT 10")
