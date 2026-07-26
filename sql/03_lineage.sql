@@ -12,7 +12,7 @@ CREATE TABLE IF NOT EXISTS lineage_edge (
   src_node_id    BIGINT NOT NULL,
   dst_node_id    BIGINT NOT NULL,
   edge_level     VARCHAR(16),              -- table/column
-  sql_id         BIGINT,                   -- 溯源;ODS映射边此列空,src_type区分
+  sql_id         BIGINT,                   -- 溯源；ODS映射边此列空,src_type区分
   src_type       VARCHAR(16) DEFAULT 'sql',   -- sql/ingest_map/manual
   confidence     VARCHAR(8) DEFAULT 'high',   -- high/medium/low(4.6)
   transform_expr TEXT,
@@ -26,7 +26,7 @@ CREATE TABLE IF NOT EXISTS lineage_edge (
   KEY idx_sql (sql_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
--- 表级传递闭包,离线重算;全量重建写 shadow 后 RENAME 原子切换(4.3)
+-- 表级传递闭包,离线重算；全量重建写 shadow 后 RENAME 原子切换(4.3)
 CREATE TABLE IF NOT EXISTS table_closure (
   ancestor   VARCHAR(320),
   descendant VARCHAR(320),

@@ -18,3 +18,37 @@ jobs:
         run: cd lineage-pipeline && python -m pytest -q
       - name: Syntax check all services
         run: python -m compileall -q lineage-pipeline/pipeline lineage-mcp-server/server
+
+  integration:
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_USER: datavein
+          MYSQL_PASSWORD: test_pw
+          MYSQL_DATABASE: bootstrap
+        ports: ["3306:3306"]
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -proot"
+          --health-interval=5s --health-timeout=3s --health-retries=20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Grant test user (E2E 需建库权限)
+        run: |
+          mysql --host 127.0.0.1 -uroot -proot \
+            -e "GRANT ALL PRIVILEGES ON *.* TO 'datavein'@'%'; FLUSH PRIVILEGES;"
+      - name: Install
+        run: pip install -e "./lineage-pipeline[dev]"
+      - name: E2E on real MySQL (M1 全链路)
+        env:
+          DV_IT_MYSQL: "1"
+          MYSQL_HOST: 127.0.0.1
+          MYSQL_USER: datavein
+          MYSQL_PASSWORD: test_pw
+          MYSQL_DB: datavein_test
+        run: cd lineage-pipeline && python -m pytest tests/integration -q

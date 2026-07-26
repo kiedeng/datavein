@@ -72,11 +72,14 @@ def test_star_without_schema_degrades_to_table_level():
     assert not _col_edges(r)
 
 
-def test_star_with_schema_expands():
+def test_dst_columns_map_positionally_to_target_schema():
+    # Hive 语义:SELECT 第3列 apply_amt 按位置写入目标表第3列 credit_amt(而非按别名)
     sql = "INSERT INTO dwd.d_apply SELECT apply_id, cust_no, apply_amt FROM ods.t_apply"
     r = parse_sql(sql, schema=SCHEMA)
     assert r.status == "success"
-    assert {e.dst.column for e in _col_edges(r)} == {"apply_id", "cust_no", "apply_amt"}
+    assert {e.dst.column for e in _col_edges(r)} == {"apply_id", "cust_no", "credit_amt"}
+    amt = [e for e in _col_edges(r) if e.dst.column == "credit_amt"]
+    assert amt[0].src == ColumnRef("ods.t_apply", "apply_amt")
 
 
 def test_non_dml_fails_with_reason():

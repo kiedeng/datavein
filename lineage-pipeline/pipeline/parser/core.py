@@ -6,6 +6,7 @@ sqlglot 为主:qualify(schema 展开 select */补前缀)→ 逐输出列 lineage
 表级交叉校验(sqllineage)与 60s 超时控制在上层 runner 实现,本模块保持纯函数。
 """
 
+import re
 import time
 
 from sqlglot import exp, parse_one
@@ -14,6 +15,10 @@ from sqlglot.lineage import lineage as sg_lineage
 from sqlglot.optimizer.qualify import qualify
 
 from ..models import ColumnRef, LineageEdge, ParseResult
+
+# Hive 多表插入(FROM src INSERT ... INSERT ...)sqlglot 不支持:
+# 按登记规范应拆分为单 INSERT 段;单列原因码供覆盖率大盘运营(5.8)
+_MULTI_INSERT_RE = re.compile(r"^\s*FROM\b.*\bINSERT\b", re.I | re.S)
 
 
 def _full_name(table: exp.Table, default_db: str) -> str:
@@ -33,6 +38,24 @@ def _extract_target(tree: exp.Expression) -> exp.Table | None:
             this = this.this
         return this if isinstance(this, exp.Table) else None
     return None
+
+
+def _dst_columns(out_cols: list[str], explicit_cols: list[str] | None,
+                 target_node: exp.Table, schema: dict | None,
+                 default_db: str) -> list[str]:
+    """目标列名映射(Hive 语义:SELECT 列按位置对应目标表列,而非按别名)。
+
+    优先级:INSERT 显式列清单 > 目标表 schema 位置映射 > SELECT 别名兜底。
+    静态分区列不出现在 SELECT 中,而分区列在 schema 快照中恒排最后
+    (metadata_sync 保证),故前缀映射即正确语义。
+    """
+    if explicit_cols and len(explicit_cols) == len(out_cols):
+        return explicit_cols
+    db = target_node.text("db") or default_db
+    target_cols = list(((schema or {}).get(db) or {}).get(target_node.name) or {})
+    if target_cols and len(out_cols) <= len(target_cols):
+        return target_cols[:len(out_cols)]
+    return out_cols
 
 
 def _select_of(tree: exp.Expression) -> exp.Expression | None:
@@ -59,7 +82,9 @@ def parse_sql(sql_text: str, dialect: str = "hive",
     try:
         tree = parse_one(sql_text, dialect=dialect)
     except SqlglotError as e:
-        return _done(ParseResult(status="failed", reason="parse_error",
+        reason = ("multi_insert_unsupported" if _MULTI_INSERT_RE.match(sql_text)
+                  else "parse_error")
+        return _done(ParseResult(status="failed", reason=reason,
                                  message=str(e)[:500]))
 
     target_node = _extract_target(tree)
@@ -67,6 +92,9 @@ def parse_sql(sql_text: str, dialect: str = "hive",
         return _done(ParseResult(status="failed", reason="no_target",
                                  message="非 INSERT/CTAS/视图定义,无法确定目标表"))
     target = _full_name(target_node, default_db)
+    explicit_cols = None
+    if isinstance(tree, exp.Insert) and isinstance(tree.this, exp.Schema):
+        explicit_cols = [c.name for c in tree.this.expressions]
 
     select = _select_of(tree)
     cte_names = {c.alias_or_name for c in tree.find_all(exp.CTE)}
@@ -86,6 +114,8 @@ def parse_sql(sql_text: str, dialect: str = "hive",
             continue                       # 目标表自身;同名再现于 FROM 即自依赖,保留
         if not t.text("db") and t.name in cte_names:
             continue                       # CTE 引用不是物理表
+        if t.find_ancestor(exp.Hint) is not None:
+            continue                       # Spark hint 参数(如 BROADCAST(o))不是表
         src_tables.setdefault(_full_name(t, default_db), t)
 
     edges = [LineageEdge(src=ColumnRef(s), dst=ColumnRef(target),
@@ -109,8 +139,9 @@ def parse_sql(sql_text: str, dialect: str = "hive",
                                  reason="star_unresolved",
                                  message="select * 无 schema 快照可展开,仅表级血缘"))
 
+    dst_names = _dst_columns(out_cols, explicit_cols, target_node, schema, default_db)
     failed_cols: list[str] = []
-    for col in out_cols:
+    for col, dst_col in zip(out_cols, dst_names):
         try:
             node = sg_lineage(col, select, schema=schema, dialect=dialect)
         except SqlglotError as e:
@@ -125,7 +156,7 @@ def parse_sql(sql_text: str, dialect: str = "hive",
             src_full = _full_name(leaf.source, default_db)
             edges.append(LineageEdge(
                 src=ColumnRef(src_full, leaf.name.split(".")[-1]),
-                dst=ColumnRef(target, col),
+                dst=ColumnRef(target, dst_col),
                 edge_level="column",
                 transform_expr=expr_sql,
                 filter_cond=where_sql,
