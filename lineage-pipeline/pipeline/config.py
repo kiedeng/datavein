@@ -56,6 +56,13 @@ REBUILD_CLOSURE_DELTA_MAX = float(_env("REBUILD_CLOSURE_DELTA_MAX", "0.10"))
 HEALTH_MAX_FULL_RUN_AGE_HOURS = int(_env("HEALTH_MAX_FULL_RUN_AGE_HOURS", "26"))
 HEALTH_MAX_FAILED_SQL = int(_env("HEALTH_MAX_FAILED_SQL", "200"))
 
+# L3 向量构建(6.4):bge 服务化端点与 Chroma 服务地址;
+# EMBEDDING_URL 未配置时用确定性 HashEmbedder(测试/无模型环境),
+# CHROMA_HOST 未配置或 chromadb 不可用时 vectorize 静默跳过
+EMBEDDING_URL = _env("EMBEDDING_URL")
+CHROMA_HOST = _env("CHROMA_HOST")
+CHROMA_PORT = int(_env("CHROMA_PORT", "8000"))
+
 # 层级推断规则:表名前缀 -> layer;domain 默认取库名,可被调度平台登记覆盖
 LAYER_PREFIX_RULES = (
     ("ods_", "ods"), ("dwd_", "dwd"), ("d_", "dwd"), ("dws_", "dws"),

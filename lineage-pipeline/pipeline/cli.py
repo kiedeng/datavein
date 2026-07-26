@@ -17,6 +17,7 @@ def main():
     p_incr = sub.add_parser("incremental", help="单条 SQL 增量解析(发布钩子)")
     p_incr.add_argument("--sql-id", type=int, required=True)
     sub.add_parser("coverage", help="覆盖率大盘报表")
+    sub.add_parser("vectorize", help="向量构建:glossary+字段注释 → Chroma 双 collection(6.4)")
     sub.add_parser("healthcheck", help="健康检查(cron 用,异常退出码非0触发告警)")
     sub.add_parser("weekly-report", help="运营周报 markdown(每周一 cron)")
     args = ap.parse_args()
@@ -39,6 +40,9 @@ def main():
     elif args.cmd == "coverage":
         from . import coverage
         print(json.dumps(coverage.report(db.connect()), ensure_ascii=False, default=str))
+    elif args.cmd == "vectorize":
+        from . import vectorize
+        print(json.dumps(vectorize.run(db.connect()), ensure_ascii=False))
     elif args.cmd == "healthcheck":
         import sys
 

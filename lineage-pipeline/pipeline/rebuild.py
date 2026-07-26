@@ -9,7 +9,7 @@ import logging
 import signal
 from concurrent.futures import ProcessPoolExecutor
 
-from . import closure, config, crosscheck, db
+from . import closure, config, crosscheck, db, derive
 from .loader import bulk_insert_shadow, preload_node_cache, replace_edges_for_sql
 from .models import ParseResult
 from .parser.core import parse_sql
@@ -104,6 +104,10 @@ def full_rebuild():
         conn.commit()
         bulk_insert_shadow(conn, parsed, preload_node_cache(conn))
 
+        # tmp 穿透折叠(5.3):必须在影子表校验之前,行数口径为折叠后的最终边
+        fold_stats = derive.fold_tmp_edges(conn, edge_table="lineage_edge_shadow")
+        log.info("tmp fold: %s", fold_stats)
+
         old_edges = _count(conn, "SELECT COUNT(*) AS c FROM lineage_edge")
         new_edges = _count(conn, "SELECT COUNT(*) AS c FROM lineage_edge_shadow")
         if old_edges > 0 and abs(new_edges - old_edges) / old_edges > config.REBUILD_EDGE_DELTA_MAX:
@@ -126,7 +130,15 @@ def full_rebuild():
             return run["stats"]
         db.swap_shadow(conn, "table_closure")
 
-        run["stats"] = {"parse": stats, "edges": new_edges, "closure_rows": closure_rows}
+        # 非自环环路检测(5.4):建模错误信号,推送双方 owner 走行内告警通道,
+        # 代码侧到 stats 与 warning 日志为止
+        cycles = closure.detect_cycles(conn)
+        if cycles:
+            log.warning("检出非自环环路 %d 组(建模错误信号,5.4),需通知双方 owner: %s",
+                        len(cycles), cycles[:20])
+
+        run["stats"] = {"parse": stats, "edges": new_edges, "closure_rows": closure_rows,
+                        "tmp_fold": fold_stats, "cycles": cycles}
         return run["stats"]
 
 
@@ -148,6 +160,8 @@ def incremental(sql_id: int):
                                         job["dialect"] or config.SQL_DIALECT_DEFAULT)):
             result.reason = "crosscheck_mismatch"
         replace_edges_for_sql(conn, sql_id, result)
+        # tmp 穿透折叠(5.3):增量只在同 task_id 范围内折叠,限制见 fold_for_task
+        fold_stats = derive.fold_for_task(conn, sql_id)
         outcome = closure.incremental_patch(
             conn, result.target_table or job["target_table"])
         if outcome == "degrade_full_rebuild":
@@ -155,5 +169,6 @@ def incremental(sql_id: int):
             log.warning("closure patch degraded for %s, schedule full rebuild",
                         result.target_table)
         run["stats"] = {"sql_id": sql_id, "parse": result.status,
-                        "reason": result.reason, "closure": outcome}
+                        "reason": result.reason, "closure": outcome,
+                        "tmp_fold": fold_stats}
         return run["stats"]

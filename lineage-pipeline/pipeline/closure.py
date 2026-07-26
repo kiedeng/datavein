@@ -62,6 +62,28 @@ def rebuild_closure_shadow(conn) -> int:
     return len(rows)
 
 
+def find_cycle_pairs(pairs) -> list[tuple[str, str]]:
+    """闭包连通对中 (a,b) 与 (b,a) 同时存在的非自环环路对,去重排序(5.4)。"""
+    s = set(pairs)
+    return sorted({tuple(sorted((a, b))) for a, b in s if a != b and (b, a) in s})
+
+
+def detect_cycles(conn) -> list[tuple[str, str]]:
+    """基于 table_closure 检出非自环环路(建模错误信号,5.4)。
+
+    SQL 侧自联接完成互连通判定,避免全表拉回内存;结果进 pipeline_run.stats,
+    推送双方 owner 由行内告警通道消费,代码到 stats 为止。
+    """
+    with conn.cursor() as cur:
+        cur.execute("""
+            SELECT t1.ancestor AS a, t1.descendant AS b
+            FROM table_closure t1
+            JOIN table_closure t2
+              ON t1.ancestor = t2.descendant AND t1.descendant = t2.ancestor
+            WHERE t1.ancestor < t1.descendant""")
+        return sorted({(r["a"], r["b"]) for r in cur.fetchall()})
+
+
 def incremental_patch(conn, target_table: str) -> str:
     """单表入边变化后的闭包修补(2.2)。返回 'patched' 或 'degrade_full_rebuild'。
 
