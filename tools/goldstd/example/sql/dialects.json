@@ -1,0 +1,15 @@
+{
+  "01_etl_dwd_apply_n1": "hive",
+  "02_etl_dwd_contract_n1": "hive",
+  "03_etl_dwd_repay_n1": "hive",
+  "04_etl_dws_cust_summary_n1": "hive",
+  "05_etl_dws_org_day_n1": "spark",
+  "06_etl_ads_report_n1": "spark",
+  "07_etl_ads_risk_tag_n1": "hive",
+  "08_etl_multi_insert_n1": "hive",
+  "09_etl_tmp_chain_n1": "hive",
+  "10_etl_tmp_chain_n2": "hive",
+  "11_etl_view_org_credit_n1": "hive",
+  "12_etl_apply_snapshot_n1": "hive",
+  "13_etl_ads_cube_n1": "spark"
+}

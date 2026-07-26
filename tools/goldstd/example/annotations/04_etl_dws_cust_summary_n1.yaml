@@ -1,0 +1,56 @@
+# ============================ 金标准标注文件(机器预填) ============================
+# 人工核对:确认无误改 verified: true,有错直接改数据(改完同样置 verified: true)。
+#   1. 对照同名 .sql 文件逐项检查 target_table / table_sources / column_edges;
+#   2. dst_col 以目标表 schema 的位置映射为准(Hive 语义,非 SELECT 别名);
+#   3. CTE / 子查询别名不是物理源表,table_sources 只留真实库表;
+#   4. expr 是表达式摘要,比对时做"归一化子串"匹配;拿不准可清空(留空=跳过表达式比对);
+#   5. machine_status: failed 且确认该 SQL 确实无法/不应解析(如 Hive 多表插入应拆分)时,
+#      保持 target_table: null 直接置 verified: true;若人工能标出真实血缘,请补全数据。
+# machine_* 字段是解析器原始输出快照,仅供参考,不参与比对。
+# ==================================================================================
+case_id: 04_etl_dws_cust_summary_n1
+sql_file: 04_etl_dws_cust_summary_n1.sql
+dialect: hive
+machine_status: success
+machine_reason: ''
+verified: true
+notes: ''
+target_table: dws.dws_cust_credit_summary
+table_sources:
+- dwd.dwd_apply_detail
+- dwd.dwd_contract_detail
+- dws.dws_cust_credit_summary
+- ods.ods_t_cust
+column_edges:
+- dst_col: cust_no
+  src_table: dws.dws_cust_credit_summary
+  src_col: cust_no
+  expr: m.cust_no AS cust_no
+- dst_col: cust_no
+  src_table: dwd.dwd_contract_detail
+  src_col: cust_no
+  expr: m.cust_no AS cust_no
+- dst_col: org_no
+  src_table: dws.dws_cust_credit_summary
+  src_col: org_no
+  expr: m.org_no AS org_no
+- dst_col: org_no
+  src_table: ods.ods_t_cust
+  src_col: org_no
+  expr: m.org_no AS org_no
+- dst_col: total_credit_amt
+  src_table: dws.dws_cust_credit_summary
+  src_col: total_credit_amt
+  expr: SUM(m.credit_amt) AS total_credit_amt
+- dst_col: total_credit_amt
+  src_table: dwd.dwd_apply_detail
+  src_col: apply_amt
+  expr: SUM(m.credit_amt) AS total_credit_amt
+- dst_col: total_repay_amt
+  src_table: dws.dws_cust_credit_summary
+  src_col: total_repay_amt
+  expr: SUM(m.repay_amt) AS total_repay_amt
+- dst_col: contract_cnt
+  src_table: dws.dws_cust_credit_summary
+  src_col: contract_cnt
+  expr: SUM(m.cnt) AS contract_cnt

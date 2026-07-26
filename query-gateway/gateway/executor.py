@@ -45,9 +45,17 @@ def validate_select_only(sql: str) -> exp.Select:
     tree = trees[0]
     if not isinstance(tree, exp.Select):
         raise ExecutionRejected(f"仅放行 SELECT,收到 {type(tree).__name__};已审计告警")
+    # SELECT ... FOR UPDATE / LOCK IN SHARE MODE 是 Select 但会加锁,只读通道拒绝
+    if tree.args.get("locks"):
+        raise ExecutionRejected("拒绝加锁读(FOR UPDATE / LOCK IN SHARE MODE);已审计告警")
+    # SELECT ... INTO OUTFILE/DUMPFILE/@var 数据外带,拒绝
+    if tree.args.get("into"):
+        raise ExecutionRejected("拒绝 SELECT ... INTO(数据外带);已审计告警")
+    # 黑名单大小写归一化匹配(Linux 下库表名大小写敏感,防大小写变体绕过)
+    blacklist = {b.lower() for b in config.BLACKLIST_TABLES}
     for t in tree.find_all(exp.Table):
         full = f'{t.text("db")}.{t.name}' if t.text("db") else t.name
-        if full in config.BLACKLIST_TABLES:
+        if full.lower() in blacklist:
             raise ExecutionRejected(f"表 {full} 在敏感黑名单,拒绝执行")
     if tree.args.get("limit") is None:
         raise ExecutionRejected("缺少 LIMIT(编译器/校验层必须注入)")
@@ -71,8 +79,16 @@ def execute(sql: str, masked_columns: list[str] | None = None) -> dict:
             if config.WAREHOUSE_DIALECT == "mysql":
                 cur.execute(
                     f"SET SESSION max_execution_time = {config.QUERY_TIMEOUT_MS}")
-            cur.execute(sql)
-            rows = cur.fetchall()
+                # 只读事务纵深防御:即使数仓账号误配写权限,会话层也拒绝任何写
+                cur.execute("START TRANSACTION READ ONLY")
+                try:
+                    cur.execute(sql)
+                    rows = cur.fetchall()
+                finally:
+                    cur.execute("COMMIT")
+            else:
+                cur.execute(sql)
+                rows = cur.fetchall()
     for row in rows:
         for col in masked & row.keys():
             row[col] = _mask(row[col])

@@ -1,0 +1,128 @@
+{
+  "ods": {
+    "ods_t_apply": {
+      "apply_id": "bigint",
+      "cust_no": "string",
+      "prod_cd": "string",
+      "apply_amt": "decimal(18,2)",
+      "apply_status": "string",
+      "apply_time": "string",
+      "dt": "string"
+    },
+    "ods_t_contract": {
+      "contract_no": "string",
+      "apply_id": "bigint",
+      "cust_no": "string",
+      "contract_amt": "decimal(18,2)",
+      "start_date": "string",
+      "end_date": "string",
+      "dt": "string"
+    },
+    "ods_t_repay": {
+      "repay_id": "bigint",
+      "contract_no": "string",
+      "repay_amt": "decimal(18,2)",
+      "repay_date": "string",
+      "repay_type": "string",
+      "dt": "string"
+    },
+    "ods_t_cust": {
+      "cust_no": "string",
+      "cust_name": "string",
+      "id_card": "string",
+      "mobile": "string",
+      "org_no": "string",
+      "risk_tags": "string",
+      "dt": "string"
+    }
+  },
+  "dim": {
+    "dim_org": {
+      "org_no": "string",
+      "org_name": "string",
+      "parent_org_no": "string"
+    }
+  },
+  "dwd": {
+    "dwd_apply_detail": {
+      "apply_id": "bigint",
+      "cust_no": "string",
+      "prod_cd": "string",
+      "apply_amt": "decimal(18,2)",
+      "apply_status": "string",
+      "apply_date": "string",
+      "dt": "string"
+    },
+    "dwd_apply_snapshot": {
+      "apply_id": "bigint",
+      "cust_no": "string",
+      "prod_cd": "string",
+      "apply_amt": "decimal(18,2)",
+      "apply_status": "string",
+      "apply_time": "string",
+      "dt": "string"
+    },
+    "dwd_contract_detail": {
+      "contract_no": "string",
+      "apply_id": "bigint",
+      "cust_no": "string",
+      "contract_amt": "decimal(18,2)",
+      "is_active": "tinyint",
+      "dt": "string"
+    },
+    "dwd_repay_detail": {
+      "repay_id": "bigint",
+      "contract_no": "string",
+      "repay_amt": "decimal(18,2)",
+      "repay_date": "string",
+      "is_prepay": "tinyint",
+      "dt": "string"
+    }
+  },
+  "tmp_credit": {
+    "tmp_repay_dedup": {
+      "repay_id": "bigint",
+      "contract_no": "string",
+      "repay_amt": "decimal(18,2)",
+      "repay_date": "string",
+      "repay_type": "string"
+    }
+  },
+  "dws": {
+    "dws_cust_credit_summary": {
+      "cust_no": "string",
+      "org_no": "string",
+      "total_credit_amt": "decimal(18,2)",
+      "total_repay_amt": "decimal(18,2)",
+      "contract_cnt": "bigint",
+      "dt": "string"
+    },
+    "dws_org_credit_day": {
+      "org_no": "string",
+      "org_name": "string",
+      "credit_amt": "decimal(18,2)",
+      "apply_cnt": "bigint",
+      "dt": "string"
+    }
+  },
+  "ads": {
+    "ads_credit_report": {
+      "org_no": "string",
+      "org_name": "string",
+      "credit_amt": "decimal(18,2)",
+      "credit_rank": "bigint",
+      "dt": "string"
+    },
+    "ads_cust_risk_tag": {
+      "cust_no": "string",
+      "risk_tag": "string",
+      "dt": "string"
+    },
+    "ads_apply_cube": {
+      "org_no": "string",
+      "apply_status": "string",
+      "apply_cnt": "bigint",
+      "dt": "string"
+    }
+  }
+}

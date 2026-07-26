@@ -69,12 +69,18 @@ def run_adhoc(question: str, tables: list[str], user_ctx: dict,
 
     sql = llm.generate_sql(question, _build_context(platform_conn, tables))
 
-    # 静态校验:表集合闭包在圈定范围内
+    # 静态校验:表集合闭包在圈定范围内。
+    # 收集全部表引用,含无库名前缀者——无前缀表若被默认库解析可读到圈外表,
+    # 必须要求全限定名并纳入范围校验,不能因 t.text("db") 为空而漏检(安全走查修复)。
     tree = parse_one(sql, dialect=config.WAREHOUSE_DIALECT)
     if not isinstance(tree, exp.Select):
         raise executor.ExecutionRejected("生成结果不是 SELECT,已拒绝")
-    used = {f'{t.text("db")}.{t.name}' for t in tree.find_all(exp.Table)
-            if t.text("db")}
+    unqualified = sorted({t.name for t in tree.find_all(exp.Table)
+                          if not t.text("db")})
+    if unqualified:
+        raise executor.ExecutionRejected(
+            f"生成的 SQL 含无库名前缀的表 {unqualified},拒绝执行(须使用 db.table 全限定名)")
+    used = {f'{t.text("db")}.{t.name}' for t in tree.find_all(exp.Table)}
     illegal = used - set(tables)
     if illegal:
         raise executor.ExecutionRejected(f"SQL 使用了圈定范围外的表: {sorted(illegal)}")
