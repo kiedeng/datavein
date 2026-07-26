@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "lineage": {
+      "type": "http",
+      "url": "${LINEAGE_MCP_URL}",
+      "headers": {
+        "Authorization": "Bearer ${LINEAGE_MCP_TOKEN}"
+      }
+    }
+  }
+}

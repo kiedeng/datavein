@@ -1,0 +1,18 @@
+[project]
+name = "lineage-pipeline"
+version = "0.1.0"
+description = "血缘解析流水线:元数据同步/SQL收集/sqlglot解析/闭包重建/覆盖率大盘"
+requires-python = ">=3.11"
+dependencies = [
+    # 版本锁死(设计方案 5.8/7.2):升级须跑通 tests/ 金标准用例后才能改
+    "sqlglot==26.16.4",
+    "sqllineage>=1.5",       # 表级交叉校验(5.2)
+    "pymysql>=1.1",
+    "redis>=5.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

@@ -1,0 +1,11 @@
+[project]
+name = "lineage-mcp-server"
+version = "0.1.0"
+description = "血缘 MCP 服务:7 工具 + REST 镜像(设计方案 8 章)"
+requires-python = ">=3.11"
+dependencies = [
+    "fastmcp>=2.3",
+    "pymysql>=1.1",
+    "redis>=5.0",
+    "rapidfuzz>=3.0",        # L2 模糊匹配(6.1)
+]
