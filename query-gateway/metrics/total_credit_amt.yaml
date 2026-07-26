@@ -1,0 +1,27 @@
+# 指标定义(附录B Schema 示例;Git 评审生效,发布即带版本)
+metric: total_credit_amt
+cn_name: 授信总额
+caliber: 客户授信金额加总,取 dws.dws_cust_credit_summary 当日快照;含存量授信。口径 owner:信贷域。
+version: 1
+base_table: dws.dws_cust_credit_summary
+expression: SUM(base.total_credit_amt)
+dimensions:
+  org_no:
+    column: base.org_no
+  org_name:
+    column: o.org_name
+    join:
+      alias: o
+      table: dim.dim_org
+      "on": o.org_no = base.org_no
+  cust_no:
+    column: base.cust_no
+    sensitivity: L3          # 掩码输出,需敏感白名单
+  dt:
+    column: base.dt
+default_filters:
+  - base.dt IS NOT NULL
+row_policy: base.org_no IN :user_orgs
+verified_questions:
+  - 各机构的授信总额是多少
+  - 查一下2026年7月25日的机构授信排名

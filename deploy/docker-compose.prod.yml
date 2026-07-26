@@ -73,6 +73,38 @@ services:
   mcp-server-2:
     <<: *mcp
 
+  query-gateway:
+    build: ../query-gateway
+    restart: unless-stopped
+    env_file: ../.env
+    environment:
+      MYSQL_HOST: mysql
+    depends_on:
+      mysql: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import socket; socket.create_connection(('127.0.0.1', 8090), 3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+    deploy:
+      resources:
+        limits: {memory: 1G}
+
+  web-portal:
+    build: ../web-portal
+    restart: unless-stopped
+    env_file: ../.env
+    environment:
+      MYSQL_HOST: mysql
+      REDIS_URL: redis://redis:6379/0
+      GATEWAY_URL: http://query-gateway:8090
+    depends_on:
+      mysql: {condition: service_healthy}
+    deploy:
+      resources:
+        limits: {memory: 1G}
+
   nginx:
     image: nginx:1.27-alpine
     restart: unless-stopped

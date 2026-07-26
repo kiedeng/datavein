@@ -20,3 +20,7 @@ MAX_NODES = 200               # 单响应节点上限,超限截断分页并提�
 
 # 热点缓存 TTL 到次日重建时刻(设计方案 12 章:血缘日更,TTL 到日级)
 REBUILD_HOUR = int(os.environ.get("REBUILD_HOUR", "3"))
+
+# 查询网关(M4 取数通道;未配置时取数工具返回引导话术)
+GATEWAY_URL = os.environ.get("GATEWAY_URL", "")
+GATEWAY_TOKEN = os.environ.get("GATEWAY_TOKEN", "")

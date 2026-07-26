@@ -64,17 +64,54 @@ def get_table_info(full_name: str) -> dict:
     return repo.get_table_info(_conn(), full_name)
 
 
+def _gateway_post(path: str, payload: dict) -> dict:
+    if not config.GATEWAY_URL:
+        return {"error": "gateway_not_configured",
+                "hint": "查询网关未配置(GATEWAY_URL),取数能力未开放;请引导用户走血缘/口径类问题"}
+    import requests
+    try:
+        resp = requests.post(config.GATEWAY_URL.rstrip("/") + path, json=payload,
+                             headers={"X-Gateway-Token": config.GATEWAY_TOKEN},
+                             timeout=60)
+        resp.raise_for_status()
+        return resp.json()
+    except requests.RequestException as e:
+        return {"error": "gateway_unavailable", "hint": str(e)[:200]}
+
+
+@mcp.tool
+def list_metrics() -> dict:
+    """语义层指标清单:组织 query_metric 的 plan 前先查可用指标与维度。"""
+    return _gateway_post("/metrics", {})
+
+
 @mcp.tool
 def query_metric(plan: dict, user_ctx: dict) -> dict:
-    """可信取数(S3,M4):plan 经语义层编译执行,返回数据+SQL+口径+指标版本。"""
-    return {"error": "not_implemented", "milestone": "M4",
-            "hint": "语义层与查询网关未上线,请引导用户走血缘/口径类问题"}
+    """可信取数(S3):plan 经语义层确定性编译执行,返回数据+SQL+口径+指标版本。
+    plan 只能引用 list_metrics 返回的已声明维度;越界会返回可用字段清单,按提示自纠。
+    回答必须完整呈现:数据 → SQL → 口径 → 指标版本("数字收据")。"""
+    return _gateway_post("/query/metric", {"plan": plan, "user_ctx": user_ctx})
 
 
 @mcp.tool
 def run_adhoc_sql(question: str, user_ctx: dict) -> dict:
-    """兜底取数(M4):受控 Text-to-SQL,结果强制标注"自由查询"。"""
-    return {"error": "not_implemented", "milestone": "M4"}
+    """兜底取数(7.3):语义层无匹配指标时使用。先检索圈定 2-5 张相关表,
+    经受控 Text-to-SQL 生成并静态校验后执行。结果强制标注"自由查询",
+    回答时必须明确告知用户此结果未经口径认证。"""
+    st = repo.search_term(_conn(), question)
+    tables = []
+    for fam in st.get("families", []):
+        for cand in [fam["anchor"]] + fam.get("members", []):
+            t = cand.get("ref_table") or cand.get("full_name")
+            if t and t not in tables:
+                tables.append(t)
+    tables = tables[:5]
+    if not tables:
+        return {"error": "no_table_located",
+                "hint": "检索未能圈定相关表,请让用户补充表名或业务术语后重试"}
+    return _gateway_post("/query/adhoc",
+                         {"question": question, "tables": tables,
+                          "user_ctx": user_ctx})
 
 
 if __name__ == "__main__":
