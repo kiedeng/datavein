@@ -15,6 +15,8 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0"]
+# L3 向量构建(6.4):内网无 chromadb 时 vectorize 静默跳过,代码为 optional import
+vector = ["chromadb>=0.5"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -42,11 +42,9 @@ def get_lineage(full_name: str, column: str = "", direction: str = "upstream",
 
 @mcp.tool
 def get_lineage_path(from_table: str, to_table: str) -> dict:
-    """两点间链路:先闭包判连通,连通再走边表取明细路径(M2 实现明细,先返回连通性)。"""
-    conn = _conn()
-    connected = repo._connected(conn, from_table, to_table)
-    return {"from": from_table, "to": to_table, "connected": connected,
-            "detail": "M2: 边表按最短路取逐跳明细" if connected else None}
+    """两点间链路:闭包 O(1) 判连通后,表级边 BFS 取最短路径,
+    返回逐跳明细(src/dst/transform_expr/filter_cond/sql_id/confidence)。"""
+    return repo.get_lineage_path(_conn(), from_table, to_table)
 
 
 @mcp.tool

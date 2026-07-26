@@ -9,4 +9,9 @@ dependencies = [
     "DBUtils>=3.0",          # 连接池
     "redis>=5.0",
     "rapidfuzz>=3.0",        # L2 模糊匹配(6.1)
+    "requests>=2.31",        # HttpEmbedder:bge 服务化端点(6.1/6.4)
 ]
+
+[project.optional-dependencies]
+# L3 向量检索(6.1/6.4):内网无 chromadb 时 L3 静默跳过,代码为 optional import
+vector = ["chromadb>=0.5"]

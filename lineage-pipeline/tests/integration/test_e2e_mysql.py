@@ -112,6 +112,10 @@ def test_10_full_rebuild(env):
     assert stats["parse"]["success"] == 12
     assert stats["parse"]["failed"] == 1          # multi-insert 按设计失败
     assert stats["edges"] > 0 and stats["closure_rows"] > 0
+    # tmp 穿透折叠已执行(5.3);语料库无建模环路(5.4)
+    assert stats["tmp_fold"]["synthetic_edges"] > 0
+    assert stats["tmp_fold"]["deleted_tmp_edges"] > 0
+    assert stats["cycles"] == []
 
     conn = env["conn"]
     # multi-insert 原因码单列(5.8)
@@ -133,10 +137,45 @@ def test_20_closure_facts(env):
     row = _one(conn, """SELECT min_hops FROM table_closure
                         WHERE ancestor='ods.ods_t_apply' AND descendant='ads.ads_credit_report'""")
     assert row and row["min_hops"] == 3
-    # 还款表到明细:直连 1 跳(tmp 链路为 2 跳,min 取 1)
+    # 还款表到明细:直连 1 跳(tmp 链路已被 5.3 折叠为 1 跳合成边)
     row = _one(conn, """SELECT min_hops FROM table_closure
                         WHERE ancestor='ods.ods_t_repay' AND descendant='dwd.dwd_repay_detail'""")
     assert row and row["min_hops"] == 1
+
+
+def test_25_tmp_fold(env):
+    """5.3:etl_tmp_chain 任务全量重建后,tmp 链折叠为 is_derived 直连边,tmp 边清零。"""
+    conn = env["conn"]
+    # 表级:dwd_repay_detail 的上游直接可见 ods_t_repay 的 is_derived 边,
+    # sql_id 取下游段(etl_tmp_chain node_seq=2)
+    row = _one(conn, """
+        SELECT e.confidence, e.transform_expr, sr.task_id, sr.node_seq
+        FROM lineage_edge e
+        JOIN lineage_node s ON s.node_id=e.src_node_id
+        JOIN lineage_node d ON d.node_id=e.dst_node_id
+        JOIN sql_repository sr ON sr.sql_id=e.sql_id
+        WHERE s.full_name='ods.ods_t_repay' AND s.column_name=''
+          AND d.full_name='dwd.dwd_repay_detail' AND d.column_name=''
+          AND e.edge_level='table' AND e.is_derived=1""")
+    assert row and row["task_id"] == "etl_tmp_chain" and row["node_seq"] == 2
+    assert "经 tmp 折叠" in row["transform_expr"]
+    # 字段级按 tmp 中转列衔接:is_prepay ← repay_type,外层 CASE 表达式 + 折叠附注
+    row = _one(conn, """
+        SELECT e.transform_expr FROM lineage_edge e
+        JOIN lineage_node s ON s.node_id=e.src_node_id
+        JOIN lineage_node d ON d.node_id=e.dst_node_id
+        WHERE s.full_name='ods.ods_t_repay' AND s.column_name='repay_type'
+          AND d.full_name='dwd.dwd_repay_detail' AND d.column_name='is_prepay'
+          AND e.edge_level='column' AND e.is_derived=1""")
+    assert row and "CASE" in row["transform_expr"].upper()
+    assert "经 tmp 折叠" in row["transform_expr"]
+    # tmp_credit.* 相关边全部清除(节点保留无妨,边必须清)
+    row = _one(conn, """
+        SELECT COUNT(*) AS c FROM lineage_edge e
+        JOIN lineage_node s ON s.node_id=e.src_node_id
+        JOIN lineage_node d ON d.node_id=e.dst_node_id
+        WHERE s.full_name LIKE 'tmp_credit.%%' OR d.full_name LIKE 'tmp_credit.%%'""")
+    assert row["c"] == 0
 
 
 def test_30_multi_writer_coexist(env):
@@ -186,6 +225,25 @@ def test_50_mcp_queries(env):
     # 检索:精确表名命中单族
     st = repo.search_term(conn, "dws_cust_credit_summary")
     assert st["families"] and not st["ambiguous"]
+
+
+def test_55_lineage_path(env):
+    """8.1 get_lineage_path:闭包判连通 → 表级边 BFS 最短路逐跳明细。"""
+    from server import repo
+    conn = repo.connect()
+    # ods.ods_t_apply → ads.ads_credit_report:3 跳
+    path = repo.get_lineage_path(conn, "ods.ods_t_apply", "ads.ads_credit_report")
+    assert path["connected"] and path["min_hops"] == 3 and len(path["hops"]) == 3
+    assert path["hops"][0]["src"] == "ods.ods_t_apply"
+    assert path["hops"][1]["src"] == "dwd.dwd_apply_detail"
+    assert path["hops"][2]["src"] == "dws.dws_org_credit_day"
+    assert path["hops"][2]["dst"] == "ads.ads_credit_report"
+    for h in path["hops"]:                      # 逐跳明细字段齐全(8.1)
+        assert {"src", "dst", "transform_expr", "filter_cond",
+                "sql_id", "confidence"} <= set(h)
+    # 反向不连通
+    rev = repo.get_lineage_path(conn, "ads.ads_credit_report", "ods.ods_t_apply")
+    assert rev["connected"] is False and rev["hops"] == []
 
 
 def test_60_incremental_update(env):

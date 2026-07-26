@@ -153,7 +153,8 @@ def build(conn, client, embedder, batch: int = 200) -> dict:
                               COALESCE(t.owner,'') AS owner
                        FROM column_metadata c
                        JOIN table_metadata t ON t.full_name = c.full_name
-                       WHERE t.is_online = 1""")
+                       WHERE t.is_online = 1
+                         AND COALESCE(t.layer,'') <> 'tmp'""")  # tmp 不进向量库(5.3)
         c_rows = cur.fetchall()
     desired_s = {}
     for r in c_rows:
