@@ -1,0 +1,198 @@
+{% extends "base.html" %}
+{% block title %}对话 - 血缘对话平台{% endblock %}
+{% block main %}
+<div class="chat-box">
+  <div class="chat-log" id="log">
+    <div class="msg bot">
+      <div class="from">助手</div>
+      <div class="bubble">你好,我可以回答表/字段的<b>血缘溯源、口径、影响分析</b>类问题。
+{% if not llm_enabled %}<span class="badge warn">降级模式</span> 当前模型未接入(9.3 结构化直通):请直接输入<b>术语/表名/字段名</b>,我将返回检索与血缘结构化卡片。{% else %}<span class="badge ok">对话模式</span> 可自然语言提问,例如"ads_credit_report 的 credit_amt 是怎么算出来的"。{% endif %}</div>
+    </div>
+  </div>
+  <form class="chat-input" id="form">
+    <input type="text" id="q" placeholder="输入业务词 / 表名 / 字段名…" autocomplete="off">
+    <button type="submit" id="send">发送</button>
+  </form>
+</div>
+{% endblock %}
+{% block script %}
+<script>
+/* 对话页:POST /api/chat 的 SSE 流式渲染(EventSource 不支持 POST,用 fetch reader 手动解析) */
+const log = document.getElementById('log');
+const sessionId = crypto.randomUUID ? crypto.randomUUID() : String(Date.now());
+const history = [];   // 多轮:回传近几轮消息(9.4);血缘子图不回填,仅文本
+
+function scrollBottom() { log.scrollTop = log.scrollHeight; }
+
+function addMsg(cls, from) {
+  const m = document.createElement('div'); m.className = 'msg ' + cls;
+  m.innerHTML = '<div class="from">' + esc(from) + '</div><div class="bubble"></div>';
+  log.appendChild(m); scrollBottom();
+  return m.querySelector('.bubble');
+}
+
+/* ---------- 结构化卡片渲染(降级模式 9.3) ---------- */
+
+function renderSearchCard(d) {
+  let h = '<h4>检索结果(search_term)' + (d.ambiguous ? ' <span class="badge warn">多族歧义,请选择</span>' : '') + '</h4>';
+  d.families.forEach((f, i) => {
+    const a = f.anchor, name = a.ref_table || a.full_name || a.term || '';
+    h += '<div class="hopline"><span class="badge info">族' + (i + 1) + '</span> <b>' + esc(name) + '</b>'
+       + (a.column_name || a.ref_column ? ' . ' + esc(a.column_name || a.ref_column) : '')
+       + (a.layer ? ' <span class="badge">' + esc(a.layer) + '</span>' : '')
+       + (a.certified ? ' <span class="badge ok">certified</span>' : '')
+       + '<div class="expr">' + esc(a.comment || a.caliber || '') + (a.owner ? ' · owner: ' + esc(a.owner) : '') + '</div></div>';
+    if (f.members.length) h += '<div class="expr">同链成员:' + f.members.map(m => esc(m.full_name || m.ref_table || m.term)).join('、') + '</div>';
+  });
+  if (!d.families.length) h += '<div class="muted">无命中</div>';
+  return h;
+}
+
+/* 血缘:嵌套列表按跳分层 + 简单内联 SVG(G6 大图卡片为后续增强,见 README/10.2) */
+function renderLineageCard(d) {
+  const root = d.node.full_name + (d.node.column ? '.' + d.node.column : '');
+  let h = '<h4>血缘 · ' + esc(root) + ' · ' + (d.direction === 'upstream' ? '上游' : '下游')
+        + ' ≤' + d.depth + ' 跳' + (d.truncated ? ' <span class="badge warn">已截断</span>' : '') + '</h4>';
+  const byLevel = {};
+  d.hops.forEach(x => (byLevel[x.level] = byLevel[x.level] || []).push(x));
+  const levels = Object.keys(byLevel).sort((a, b) => a - b);
+  if (!levels.length) return h + '<div class="muted">无血缘边(可到「血缘补录」页人工画边)</div>';
+  h += '<ul class="hops">';
+  levels.forEach(lv => {
+    h += '<li><b>第 ' + lv + ' 跳</b><ul>';
+    byLevel[lv].forEach(x => {
+      h += '<li class="hopline">' + esc(x.full_name) + (x.column_name ? '.<b>' + esc(x.column_name) + '</b>' : '')
+         + (x.src_type !== 'sql' ? ' <span class="badge">' + esc(x.src_type) + '</span>' : '')
+         + (x.confidence !== 'high' ? ' <span class="badge warn">' + esc(x.confidence) + ',请人工核对</span>' : '')
+         + (x.is_self_loop ? ' <span class="badge">自依赖</span>' : '');
+      if (x.transform_expr) h += '<div class="expr">表达式:<code>' + esc(x.transform_expr) + '</code></div>';
+      if (x.filter_cond) h += '<div class="expr">过滤:<code>' + esc(x.filter_cond) + '</code></div>';
+      h += '</li>';
+    });
+    h += '</ul></li>';
+  });
+  h += '</ul>' + lineageSvg(root, byLevel, levels) + (d.hint ? '<div class="expr">' + esc(d.hint) + '</div>' : '');
+  return h;
+}
+
+/* 简单分层 SVG:第 1 跳与根节点连线;更深跳画列间连线(精确到边的画布归 G6 增强) */
+function lineageSvg(root, byLevel, levels) {
+  const colW = 210, rowH = 30, pad = 12, maxRows = 8;
+  const cols = [[{n: root, root: 1}]].concat(levels.map(lv => byLevel[lv].slice(0, maxRows).map(x => ({n: x.full_name + (x.column_name ? '.' + x.column_name : ''), more: byLevel[lv].length > maxRows}))));
+  const H = Math.max(...cols.map(c => c.length)) * rowH + pad * 2;
+  const W = cols.length * colW;
+  let s = '<div class="lineage-svg"><svg xmlns="http://www.w3.org/2000/svg" width="' + W + '" height="' + H + '" font-size="11">';
+  const pos = [];
+  cols.forEach((col, ci) => {
+    pos[ci] = [];
+    col.forEach((node, ri) => {
+      const x = W - (ci + 1) * colW + 8, y = pad + ri * rowH;   // 根在最右,上游向左展开
+      pos[ci][ri] = {x, y: y + 10};
+      s += '<rect x="' + x + '" y="' + y + '" width="' + (colW - 24) + '" height="20" rx="4" fill="' + (node.root ? '#2563ab' : '#eef2f7') + '" stroke="#c9d2dd"/>'
+         + '<text x="' + (x + 6) + '" y="' + (y + 14) + '" fill="' + (node.root ? '#fff' : '#26303d') + '">' + esc(node.n.length > 26 ? node.n.slice(0, 25) + '…' : node.n) + '</text>';
+    });
+  });
+  for (let ci = 1; ci < cols.length; ci++) {
+    const toX = pos[ci - 1][0].x, toY = ci === 1 ? pos[0][0].y : pad + 10;
+    pos[ci].forEach(p => { s += '<line x1="' + (p.x + colW - 24) + '" y1="' + p.y + '" x2="' + toX + '" y2="' + toY + '" stroke="#b5c2d2"/>'; });
+  }
+  return s + '</svg></div>';
+}
+
+/* SQL 收据卡片(样式占位;M4 query-gateway 接入后由 receipt 事件启用,7.3 自由查询警示) */
+function renderReceiptCard(d) {
+  let h = '<h4>取数收据' + (d.channel === 'adhoc' ? '' : ' <span class="badge ok">语义层认证</span>') + '</h4>';
+  if (d.channel === 'adhoc') h += '<div class="adhoc-warn">自由查询:结果未经语义层认证,口径请人工复核</div>';
+  if (d.rows && d.rows.length) {
+    h += '<table class="tbl"><tr>' + Object.keys(d.rows[0]).map(k => '<th>' + esc(k) + '</th>').join('') + '</tr>';
+    d.rows.forEach(r => { h += '<tr>' + Object.values(r).map(v => '<td>' + esc(v) + '</td>').join('') + '</tr>'; });
+    h += '</table>';
+  }
+  if (d.sql) h += '<pre class="sql">' + esc(d.sql) + '</pre>';
+  if (d.caliber) h += '<div class="caliber">口径:' + esc(d.caliber) + '</div>';
+  h += '<div class="meta">' + (d.metric_version ? '指标版本 ' + esc(d.metric_version) + ' · ' : '') + (d.data_time ? '数据时间 ' + esc(d.data_time) : '') + '</div>';
+  return h;
+}
+
+function renderCard(card) {
+  const div = document.createElement('div');
+  div.className = 'card' + (card.type === 'receipt' ? ' receipt' : '');
+  if (card.type === 'search') div.innerHTML = renderSearchCard(card.data);
+  else if (card.type === 'lineage') div.innerHTML = renderLineageCard(card.data);
+  else if (card.type === 'receipt') div.innerHTML = renderReceiptCard(card.data);
+  else div.innerHTML = '<div class="muted">' + esc(card.data.text || JSON.stringify(card.data)) + '</div>';
+  return div;
+}
+
+/* ---------- 反馈(POST /api/feedback) ---------- */
+function addFeedback(container, auditId) {
+  const fb = document.createElement('div'); fb.className = 'fb';
+  fb.innerHTML = '<button data-r="1">👍 有帮助</button><button data-r="0">👎 不准确</button>'
+               + '<input type="text" placeholder="补充说明(可选)" style="width:220px;display:none">';
+  const inp = fb.querySelector('input');
+  fb.querySelectorAll('button').forEach(b => b.addEventListener('click', async () => {
+    fb.querySelectorAll('button').forEach(x => x.classList.remove('sel'));
+    b.classList.add('sel'); inp.style.display = 'inline-block'; inp.focus();
+    const send = async () => {
+      try {
+        await dvFetch('/api/feedback', {method: 'POST', body: JSON.stringify(
+          {audit_id: auditId, rating: +b.dataset.r, comment: inp.value.trim()})});
+        fb.innerHTML = '<span class="muted small">已收到反馈,感谢!</span>';
+      } catch (e) { alert('反馈失败:' + e.message); }
+    };
+    inp.onchange = send;
+    if (!inp.dataset.armed) { inp.dataset.armed = 1; setTimeout(() => { if (!fb.querySelector('.muted')) send(); }, 4000); }
+  }));
+  container.appendChild(fb);
+}
+
+/* ---------- SSE 主流程 ---------- */
+document.getElementById('form').addEventListener('submit', async ev => {
+  ev.preventDefault();
+  const q = document.getElementById('q').value.trim();
+  if (!q) return;
+  document.getElementById('q').value = '';
+  addMsg('user', localStorage.getItem('dv_user') || 'anonymous').textContent = q;
+  const bubble = addMsg('bot', '助手');
+  const textEl = document.createElement('span'); bubble.appendChild(textEl);
+  document.getElementById('send').disabled = true;
+  let answer = '';
+  try {
+    const resp = await fetch('/api/chat', {method: 'POST', headers: dvHeaders(),
+      body: JSON.stringify({question: q, session_id: sessionId, history: history.slice(-8)})});
+    const reader = resp.body.getReader(), dec = new TextDecoder();
+    let buf = '';
+    while (true) {
+      const {done, value} = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, {stream: true});
+      let idx;
+      while ((idx = buf.indexOf('\n\n')) >= 0) {
+        const block = buf.slice(0, idx); buf = buf.slice(idx + 2);
+        let event = 'message', data = '';
+        block.split('\n').forEach(l => {
+          if (l.startsWith('event:')) event = l.slice(6).trim();
+          else if (l.startsWith('data:')) data += l.slice(5).trim();
+        });
+        if (!data) continue;
+        const p = JSON.parse(data);
+        if (event === 'delta') { answer += p.text; textEl.textContent = answer; }
+        else if (event === 'tool') {
+          const t = document.createElement('div'); t.className = 'toolline';
+          t.innerHTML = '🔧 调用 <code>' + esc(p.tool) + '</code> ' + esc(JSON.stringify(p.args)) + ' · ' + p.cost_ms + 'ms' + (p.ok ? '' : ' <span class="badge bad">失败</span>');
+          bubble.appendChild(t);
+        }
+        else if (event === 'card') bubble.appendChild(renderCard(p));
+        else if (event === 'notice') { const n = document.createElement('div'); n.className = 'adhoc-warn'; n.textContent = p.text; bubble.appendChild(n); }
+        else if (event === 'error') { const n = document.createElement('div'); n.className = 'adhoc-warn'; n.textContent = p.text; bubble.appendChild(n); }
+        else if (event === 'done') addFeedback(bubble, p.audit_id);
+        scrollBottom();
+      }
+    }
+    history.push({role: 'user', content: q});
+    if (answer) history.push({role: 'assistant', content: answer});
+  } catch (e) { textEl.textContent = '请求失败:' + e.message; }
+  document.getElementById('send').disabled = false;
+});
+</script>
+{% endblock %}

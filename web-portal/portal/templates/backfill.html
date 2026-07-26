@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+{% block title %}血缘补录 - 血缘对话平台{% endblock %}
+{% block main %}
+<h2>血缘补录 <span class="muted small">(5.3 疑难 SQL 兜底:failed 队列 → 人工画边 src_type=manual, confidence=medium)</span></h2>
+<div class="panel">
+  <h3>解析失败队列(parse_status=failed)</h3>
+  <table class="tbl" id="tbl-failed">
+    <tr><th>sql_id</th><th>任务</th><th>目标表</th><th>原因码</th><th>owner</th><th>SQL 预览</th><th></th></tr>
+  </table>
+</div>
+<div class="panel">
+  <h3>人工画边 <span class="muted small">同一目标节点重复提交将整体替换旧 manual 边(幂等)</span></h3>
+  <div class="grid2">
+    <div class="formrow"><label>目标表*</label><input type="text" id="m-dst" placeholder="db.table"></div>
+    <div class="formrow"><label>目标字段</label><input type="text" id="m-dstcol" placeholder="留空=表级边"></div>
+  </div>
+  <div class="formrow"><label>关联 sql_id</label><input type="text" id="m-sqlid" style="max-width:160px" placeholder="来自失败队列,可空"><span class="muted small">填写后该 SQL 记录置为 parse_status=manual</span></div>
+  <h3 class="muted">来源列表</h3>
+  <table class="tbl" id="tbl-src">
+    <tr><th>来源表(db.table)*</th><th>来源字段</th><th>加工表达式</th><th></th></tr>
+  </table>
+  <div class="formrow" style="margin-top:8px">
+    <button class="ghost" id="btn-addsrc">＋ 添加来源</button>
+    <span style="flex:1"></span>
+    <button id="btn-submit">提交补录</button>
+  </div>
+  <div id="m-result" class="muted small"></div>
+</div>
+{% endblock %}
+{% block script %}
+<script>
+/* 补录页:GET /api/backfill/failed + POST /api/lineage/manual */
+const $ = id => document.getElementById(id);
+
+function addSrcRow(full, col, expr) {
+  const tr = document.createElement('tr');
+  tr.innerHTML = '<td><input type="text" class="s-full" value="' + esc(full || '') + '"></td>'
+    + '<td><input type="text" class="s-col" value="' + esc(col || '') + '"></td>'
+    + '<td><input type="text" class="s-expr" value="' + esc(expr || '') + '"></td>'
+    + '<td><button class="mini danger">删</button></td>';
+  tr.querySelector('button').addEventListener('click', () => tr.remove());
+  $('tbl-src').appendChild(tr);
+}
+
+async function loadFailed() {
+  const d = await dvFetch('/api/backfill/failed');
+  const tbl = $('tbl-failed');
+  tbl.querySelectorAll('tr:not(:first-child)').forEach(x => x.remove());
+  if (!d.items.length) { tbl.insertAdjacentHTML('beforeend', '<tr><td colspan="7" class="muted">队列为空 🎉</td></tr>'); return; }
+  d.items.forEach(it => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = '<td>' + it.sql_id + '</td><td>' + esc(it.task_id) + ' #' + it.node_seq + '</td>'
+      + '<td>' + esc(it.target_table || '-') + '</td>'
+      + '<td><span class="badge bad">' + esc(it.parse_reason || '-') + '</span></td>'
+      + '<td>' + esc(it.owner || '-') + '</td>'
+      + '<td><pre style="max-width:340px;max-height:80px;overflow:auto;font-size:11px;background:#f4f7fa;padding:4px 6px;border-radius:4px">' + esc(it.sql_preview) + '</pre></td>'
+      + '<td><button class="mini">补录此条</button></td>';
+    tr.querySelector('button').addEventListener('click', () => {
+      $('m-dst').value = it.target_table || ''; $('m-sqlid').value = it.sql_id;
+      window.scrollTo({top: document.body.scrollHeight, behavior: 'smooth'});
+    });
+    tbl.appendChild(tr);
+  });
+}
+
+$('btn-addsrc').addEventListener('click', () => addSrcRow());
+$('btn-submit').addEventListener('click', async () => {
+  const sources = [...document.querySelectorAll('#tbl-src tr:not(:first-child)')].map(tr => ({
+    full_name: tr.querySelector('.s-full').value.trim(),
+    column: tr.querySelector('.s-col').value.trim(),
+    transform_expr: tr.querySelector('.s-expr').value.trim() || null,
+  })).filter(s => s.full_name);
+  const body = {dst_full_name: $('m-dst').value.trim(), dst_column: $('m-dstcol').value.trim(),
+                sources, sql_id: $('m-sqlid').value.trim() ? +$('m-sqlid').value.trim() : null};
+  if (!body.dst_full_name) return alert('目标表不能为空');
+  if (!sources.length) return alert('至少填写一条来源');
+  try {
+    const r = await dvFetch('/api/lineage/manual', {method: 'POST', body: JSON.stringify(body)});
+    $('m-result').textContent = '补录成功:' + r.edge_level + ' 级边 ' + r.edge_ids.length + ' 条'
+      + (r.replaced ? '(替换旧 manual 边 ' + r.replaced + ' 条)' : '') + ';闭包表随夜间全量重建生效。';
+    loadFailed();
+  } catch (e) { alert('提交失败:' + e.message); }
+});
+
+addSrcRow(); addSrcRow();
+loadFailed().catch(e => alert('加载失败:' + e.message));
+</script>
+{% endblock %}

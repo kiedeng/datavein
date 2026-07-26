@@ -1,0 +1,116 @@
+{% extends "base.html" %}
+{% block title %}术语管理 - 血缘对话平台{% endblock %}
+{% block main %}
+<h2>业务术语管理 <span class="muted small">(4.4 biz_glossary;certified 认领与消歧置顶见 6.3)</span></h2>
+<div class="panel">
+  <div class="formrow">
+    <input type="text" id="f-kw" placeholder="搜索术语/口径…" style="max-width:260px">
+    <select id="f-status" style="max-width:180px">
+      <option value="">全部状态</option><option value="active">active</option>
+      <option value="pending_review">pending_review</option><option value="deprecated">deprecated</option>
+    </select>
+    <button class="ghost" id="btn-search">查询</button>
+    <span style="flex:1"></span>
+    <button id="btn-new">＋ 新增术语</button>
+  </div>
+  <table class="tbl" id="tbl">
+    <tr><th>术语</th><th>别名</th><th>口径</th><th>域 / owner</th><th>锚定表.字段</th><th>状态</th><th>操作</th></tr>
+  </table>
+</div>
+<div class="panel" id="editor" style="display:none">
+  <h3 id="ed-title">新增术语</h3>
+  <div class="grid2">
+    <div>
+      <div class="formrow"><label>术语*</label><input type="text" id="e-term"></div>
+      <div class="formrow"><label>别名</label><input type="text" id="e-aliases" placeholder="逗号分隔"></div>
+      <div class="formrow"><label>主题域</label><input type="text" id="e-domain"></div>
+      <div class="formrow"><label>owner</label><input type="text" id="e-owner"></div>
+    </div>
+    <div>
+      <div class="formrow"><label>锚定表</label><input type="text" id="e-table" placeholder="db.table"></div>
+      <div class="formrow"><label>锚定字段</label><input type="text" id="e-column"></div>
+      <div class="formrow"><label>状态</label><select id="e-status">
+        <option value="pending_review">pending_review(待审批)</option>
+        <option value="active">active(生效)</option>
+        <option value="deprecated">deprecated(废弃)</option></select></div>
+    </div>
+  </div>
+  <div class="formrow"><label>权威口径</label><textarea id="e-caliber" rows="3" placeholder="出处、统计规则、例外情况"></textarea></div>
+  <div class="formrow"><button id="btn-save">保存</button><button class="ghost" id="btn-cancel">取消</button></div>
+</div>
+{% endblock %}
+{% block script %}
+<script>
+/* 术语管理页:GET/POST/PUT /api/glossary;审批 = pending_review→active 流转,certified = owner 认领 */
+let editingId = null;
+const $ = id => document.getElementById(id);
+
+async function load() {
+  const q = new URLSearchParams();
+  if ($('f-kw').value.trim()) q.set('keyword', $('f-kw').value.trim());
+  if ($('f-status').value) q.set('status', $('f-status').value);
+  const d = await dvFetch('/api/glossary?' + q);
+  const tbl = $('tbl');
+  tbl.querySelectorAll('tr:not(:first-child)').forEach(x => x.remove());
+  d.items.forEach(it => {
+    const stCls = it.status === 'active' ? 'ok' : it.status === 'pending_review' ? 'warn' : 'bad';
+    const tr = document.createElement('tr');
+    tr.innerHTML = '<td><b>' + esc(it.term) + '</b>' + (it.certified ? ' <span class="badge ok">certified</span>' : '') + '</td>'
+      + '<td class="small">' + esc((it.aliases || []).join('、')) + '</td>'
+      + '<td class="small">' + esc(it.caliber || '') + '</td>'
+      + '<td class="small">' + esc(it.domain || '-') + ' / ' + esc(it.owner || '-') + '</td>'
+      + '<td class="small">' + esc(it.ref_table || '') + (it.ref_column ? '.' + esc(it.ref_column) : '') + '</td>'
+      + '<td><span class="badge ' + stCls + '">' + esc(it.status) + '</span></td>'
+      + '<td style="white-space:nowrap">'
+      + '<button class="mini ghost" data-op="edit">编辑</button> '
+      + (it.status === 'pending_review' ? '<button class="mini" data-op="approve">审批通过</button> ' : '')
+      + (it.status !== 'deprecated' ? '<button class="mini danger" data-op="deprecate">废弃</button> ' : '')
+      + (!it.certified ? '<button class="mini ghost" data-op="certify">认领 certified</button>' : '')
+      + '</td>';
+    tr.querySelectorAll('button').forEach(b => b.addEventListener('click', () => op(b.dataset.op, it)));
+    tbl.appendChild(tr);
+  });
+}
+
+async function op(kind, it) {
+  try {
+    if (kind === 'edit') {
+      editingId = it.term_id; $('editor').style.display = 'block';
+      $('ed-title').textContent = '编辑术语 #' + it.term_id;
+      $('e-term').value = it.term; $('e-aliases').value = (it.aliases || []).join(',');
+      $('e-domain').value = it.domain || ''; $('e-owner').value = it.owner || '';
+      $('e-table').value = it.ref_table || ''; $('e-column').value = it.ref_column || '';
+      $('e-status').value = it.status; $('e-caliber').value = it.caliber || '';
+      return;
+    }
+    const patch = kind === 'approve' ? {status: 'active'}
+                : kind === 'deprecate' ? {status: 'deprecated'}
+                : {certified: 1};
+    await dvFetch('/api/glossary/' + it.term_id, {method: 'PUT', body: JSON.stringify(patch)});
+    load();
+  } catch (e) { alert('操作失败:' + e.message); }
+}
+
+$('btn-new').addEventListener('click', () => {
+  editingId = null; $('editor').style.display = 'block'; $('ed-title').textContent = '新增术语';
+  ['e-term','e-aliases','e-domain','e-owner','e-table','e-column','e-caliber'].forEach(i => $(i).value = '');
+  $('e-status').value = 'pending_review';
+});
+$('btn-cancel').addEventListener('click', () => $('editor').style.display = 'none');
+$('btn-save').addEventListener('click', async () => {
+  const body = {term: $('e-term').value.trim(),
+    aliases: $('e-aliases').value.split(/[,,]/).map(s => s.trim()).filter(Boolean),
+    domain: $('e-domain').value.trim(), owner: $('e-owner').value.trim(),
+    ref_table: $('e-table').value.trim(), ref_column: $('e-column').value.trim(),
+    caliber: $('e-caliber').value.trim(), status: $('e-status').value};
+  if (!body.term) return alert('术语不能为空');
+  try {
+    if (editingId) await dvFetch('/api/glossary/' + editingId, {method: 'PUT', body: JSON.stringify(body)});
+    else await dvFetch('/api/glossary', {method: 'POST', body: JSON.stringify(body)});
+    $('editor').style.display = 'none'; load();
+  } catch (e) { alert('保存失败:' + e.message); }
+});
+$('btn-search').addEventListener('click', load);
+load().catch(e => alert('加载失败:' + e.message));
+</script>
+{% endblock %}

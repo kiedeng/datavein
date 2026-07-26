@@ -1,0 +1,19 @@
+[project]
+name = "web-portal"
+version = "0.1.0"
+description = "血缘对话平台简版 Web 门户:SSE 对话/覆盖率大盘/术语管理/血缘补录(设计方案 9-10 章,M3+M5)"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.110",
+    "uvicorn>=0.29",
+    "jinja2>=3.1",
+    "httpx>=0.27",           # LLM OpenAI 兼容客户端(portal/llm.py)
+    "pymysql>=1.1",
+    "DBUtils>=3.0",          # 连接池(复用 server.repo.connect)
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "httpx>=0.27"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

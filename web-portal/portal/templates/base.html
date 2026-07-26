@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}血缘对话平台{% endblock %}</title>
+<!-- 银行内网:禁止外部 CDN/字体/JS,样式与脚本全部本地 -->
+<link rel="stylesheet" href="/static/portal.css">
+</head>
+<body>
+<header class="topbar">
+  <span class="brand">DataVein 血缘平台</span>
+  <nav>
+    <a href="/" id="nav-chat">对话</a>
+    <a href="/dashboard" id="nav-dashboard">覆盖率大盘</a>
+    <a href="/glossary" id="nav-glossary">术语管理</a>
+    <a href="/backfill" id="nav-backfill">血缘补录</a>
+  </nav>
+  <span class="who">
+    <!-- TODO(行内任务):SSO 接入后此处显示网关注入的真实用户,输入框仅为过渡 -->
+    <input id="who" type="text" placeholder="用户名(临时)" title="SSO 上线前的临时身份,随请求 X-User 头发送">
+  </span>
+</header>
+<main class="wrap">{% block main %}{% endblock %}</main>
+<script>
+/* 公共:临时身份(SSO TODO)与带 X-User 的 fetch 封装 */
+const whoEl = document.getElementById('who');
+whoEl.value = localStorage.getItem('dv_user') || '';
+whoEl.addEventListener('change', () => localStorage.setItem('dv_user', whoEl.value.trim()));
+function dvHeaders(extra) {
+  const h = Object.assign({'Content-Type': 'application/json'}, extra || {});
+  const u = (localStorage.getItem('dv_user') || '').trim();
+  if (u) h['X-User'] = u;
+  return h;
+}
+async function dvFetch(url, opts) {
+  opts = opts || {};
+  opts.headers = dvHeaders(opts.headers);
+  const resp = await fetch(url, opts);
+  if (!resp.ok) throw new Error((await resp.json().catch(() => ({}))).detail || resp.statusText);
+  return resp.json();
+}
+function esc(s) { const d = document.createElement('div'); d.textContent = s == null ? '' : String(s); return d.innerHTML; }
+const path = location.pathname;
+const active = path === '/' ? 'nav-chat' : path.startsWith('/dashboard') ? 'nav-dashboard'
+             : path.startsWith('/glossary') ? 'nav-glossary' : 'nav-backfill';
+document.getElementById(active).classList.add('active');
+</script>
+{% block script %}{% endblock %}
+</body>
+</html>
