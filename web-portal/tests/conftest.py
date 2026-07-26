@@ -139,12 +139,14 @@ def parse_sse(text: str) -> list[tuple[str, dict]]:
 
 
 def one(conn, sql: str, *args):
+    conn.rollback()          # 刷新 REPEATABLE READ 快照,可见 API 侧连接的新提交
     with conn.cursor() as cur:
         cur.execute(sql, args)
         return cur.fetchone()
 
 
 def all_rows(conn, sql: str, *args):
+    conn.rollback()          # 同上
     with conn.cursor() as cur:
         cur.execute(sql, args)
         return cur.fetchall()
