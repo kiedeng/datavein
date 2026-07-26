@@ -1,0 +1,43 @@
+services:
+  mysql:
+    image: mysql:8.0
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root_change_me}
+      MYSQL_DATABASE: ${MYSQL_DB:-datavein}
+      MYSQL_USER: ${MYSQL_USER:-datavein}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-change_me}
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_0900_ai_ci
+      - --ngram_token_size=2          # 中文注释全文检索(设计方案 2 章)
+      - --innodb_buffer_pool_size=4G
+    ports: ["3306:3306"]
+    volumes: ["./data/mysql:/var/lib/mysql"]
+
+  redis:
+    image: redis:7-alpine
+    ports: ["6379:6379"]
+
+  chroma:
+    image: chromadb/chroma:latest
+    ports: ["8000:8000"]
+    volumes: ["./data/chroma:/chroma/chroma"]
+
+  mcp-server:
+    build: ./lineage-mcp-server
+    env_file: .env
+    environment:
+      MYSQL_HOST: mysql
+      REDIS_URL: redis://redis:6379/0
+    ports: ["8080:8080"]
+    depends_on: [mysql, redis]
+
+  # pipeline 为批处理,不常驻;通过 profile 手动触发或由调度平台调起
+  pipeline:
+    build: ./lineage-pipeline
+    env_file: .env
+    environment:
+      MYSQL_HOST: mysql
+    profiles: ["batch"]
+    command: ["python", "-m", "pipeline.cli", "full-rebuild"]
+    depends_on: [mysql]

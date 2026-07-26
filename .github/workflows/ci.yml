@@ -1,0 +1,76 @@
+name: ci
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install (locked sqlglot)
+        run: |
+          pip install -e "./lineage-pipeline[dev]"
+          pip install -e "./query-gateway[dev]"
+      - name: Unit tests (解析金标准 + 闭包)
+        run: cd lineage-pipeline && python -m pytest -q
+      - name: Gateway tests (编译器 golden + 权限用例)
+        run: cd query-gateway && python -m pytest tests/test_compiler_golden.py tests/test_policy.py -q
+      - name: Syntax check all services
+        run: python -m compileall -q lineage-pipeline/pipeline lineage-mcp-server/server query-gateway/gateway
+
+  integration:
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_USER: datavein
+          MYSQL_PASSWORD: test_pw
+          MYSQL_DATABASE: bootstrap
+        ports: ["3306:3306"]
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -proot"
+          --health-interval=5s --health-timeout=3s --health-retries=20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Grant test user (E2E 需建库权限)
+        run: |
+          mysql --host 127.0.0.1 -uroot -proot \
+            -e "GRANT ALL PRIVILEGES ON *.* TO 'datavein'@'%'; FLUSH PRIVILEGES;"
+      - name: Install
+        run: |
+          pip install -e "./lineage-pipeline[dev]"
+          pip install -e "./query-gateway[dev]"
+          pip install -e "./lineage-mcp-server"      # E2E 引用 server.repo(rapidfuzz 等)
+          pip install -e "./web-portal[dev]"
+      - name: E2E on real MySQL (M1 全链路)
+        env:
+          DV_IT_MYSQL: "1"
+          MYSQL_HOST: 127.0.0.1
+          MYSQL_USER: datavein
+          MYSQL_PASSWORD: test_pw
+          MYSQL_DB: datavein_test
+        run: cd lineage-pipeline && python -m pytest tests/integration -q
+      - name: Gateway E2E (语义层执行 + 权限 + 审计)
+        env:
+          DV_IT_MYSQL: "1"
+          MYSQL_HOST: 127.0.0.1
+          MYSQL_USER: datavein
+          MYSQL_PASSWORD: test_pw
+        run: cd query-gateway && python -m pytest tests/integration -q
+      - name: Portal tests (对话降级/大盘/术语/补录)
+        env:
+          DV_IT_MYSQL: "1"
+          MYSQL_HOST: 127.0.0.1
+          MYSQL_USER: datavein
+          MYSQL_PASSWORD: test_pw
+        run: cd web-portal && python -m pytest tests -q

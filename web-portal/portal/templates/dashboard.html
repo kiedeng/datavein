@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block title %}覆盖率大盘 - 血缘对话平台{% endblock %}
+{% block main %}
+<h2>血缘覆盖率大盘 <span class="muted small">(口径见设计方案 5.6:加工层 = 有血缘入边表 / 全部在线加工层表)</span></h2>
+<div class="grid2">
+  <div class="panel">
+    <h3>加工层总体覆盖率</h3>
+    <div style="font-size:34px;font-weight:600" id="total-cov">–</div>
+    <div class="muted small">dwd / dws / ads / dim;ODS 覆盖率(ingest_map)单列不在此口径</div>
+  </div>
+  <div class="panel">
+    <h3>confidence=medium 边占比 <span class="muted small">(4.6 需人工核对的边)</span></h3>
+    <div style="font-size:34px;font-weight:600" id="medium-ratio">–</div>
+    <div class="muted small" id="conf-detail"></div>
+  </div>
+</div>
+<div class="panel">
+  <h3>分层覆盖率</h3>
+  <table class="tbl" id="tbl-layer"><tr><th>层</th><th>在线表数</th><th>已覆盖</th><th style="width:40%">覆盖率</th></tr></table>
+</div>
+<div class="panel">
+  <h3>层 × 主题域 × owner 下钻</h3>
+  <div class="formrow"><label>筛选层</label><select id="f-layer" style="max-width:160px"><option value="">全部</option></select></div>
+  <table class="tbl" id="tbl-dim"><tr><th>层</th><th>主题域</th><th>owner</th><th>表数</th><th>覆盖</th><th style="width:30%">覆盖率</th></tr></table>
+</div>
+<div class="panel">
+  <h3>SQL 解析状态与原因码分布 <span class="muted small">(5.8 failed/degraded 原因码单列运营)</span></h3>
+  <table class="tbl" id="tbl-status"><tr><th>parse_status</th><th>原因码</th><th>条数</th></tr></table>
+</div>
+{% endblock %}
+{% block script %}
+<script>
+/* 大盘页:GET /api/dashboard 一次拉取,前端纯 CSS 条形渲染(不引图表库,内网红线) */
+function pct(v) { return (v * 100).toFixed(1) + '%'; }
+function bar(v, warn) {
+  return '<div class="bar' + (warn ? ' warnbar' : '') + '"><i style="width:' + Math.round(v * 100) + '%"></i></div>';
+}
+let DIM = [];
+function renderDim(layer) {
+  const tbl = document.getElementById('tbl-dim');
+  tbl.querySelectorAll('tr:not(:first-child)').forEach(x => x.remove());
+  DIM.filter(r => !layer || r.layer === layer).forEach(r => {
+    const cov = r.total_tables ? r.covered_tables / r.total_tables : 0;
+    tbl.insertAdjacentHTML('beforeend', '<tr><td>' + esc(r.layer) + '</td><td>' + esc(r.domain || '-') + '</td><td>' + esc(r.owner || '-')
+      + '</td><td>' + r.total_tables + '</td><td>' + r.covered_tables + '</td><td>' + bar(cov, cov < 0.9) + ' ' + pct(cov) + '</td></tr>');
+  });
+}
+(async () => {
+  const d = await dvFetch('/api/dashboard');
+  document.getElementById('total-cov').textContent = pct(d.process_layer_coverage);
+  document.getElementById('medium-ratio').textContent = pct(d.medium_edge_ratio);
+  document.getElementById('conf-detail').textContent = d.edge_confidence.map(x => (x.confidence || '-') + ': ' + x.cnt + ' 条').join(' · ');
+  const tl = document.getElementById('tbl-layer');
+  d.by_layer.forEach(r => tl.insertAdjacentHTML('beforeend',
+    '<tr><td>' + esc(r.layer) + '</td><td>' + r.total_tables + '</td><td>' + r.covered_tables
+    + '</td><td>' + bar(r.coverage, r.coverage < 0.9) + ' ' + pct(r.coverage) + '</td></tr>'));
+  DIM = d.by_dimension;
+  const sel = document.getElementById('f-layer');
+  [...new Set(DIM.map(r => r.layer))].forEach(l => sel.insertAdjacentHTML('beforeend', '<option>' + esc(l) + '</option>'));
+  sel.addEventListener('change', () => renderDim(sel.value));
+  renderDim('');
+  const ts = document.getElementById('tbl-status');
+  d.parse_status.forEach(r => {
+    const cls = r.parse_status === 'failed' ? 'bad' : r.parse_status === 'degraded' ? 'warn' : r.parse_status === 'success' ? 'ok' : '';
+    ts.insertAdjacentHTML('beforeend', '<tr><td><span class="badge ' + cls + '">' + esc(r.parse_status) + '</span></td><td>'
+      + esc(r.parse_reason || '-') + '</td><td>' + r.cnt + '</td></tr>');
+  });
+})().catch(e => alert('大盘加载失败:' + e.message));
+</script>
+{% endblock %}

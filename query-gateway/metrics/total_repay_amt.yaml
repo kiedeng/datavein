@@ -1,0 +1,21 @@
+metric: total_repay_amt
+cn_name: 还款总额
+caliber: 客户还款金额加总,取 dws.dws_cust_credit_summary 当日快照。口径 owner:信贷域。
+version: 1
+base_table: dws.dws_cust_credit_summary
+expression: SUM(base.total_repay_amt)
+dimensions:
+  org_no:
+    column: base.org_no
+  org_name:
+    column: o.org_name
+    join:
+      alias: o
+      table: dim.dim_org
+      "on": o.org_no = base.org_no
+  dt:
+    column: base.dt
+default_filters: []
+row_policy: base.org_no IN :user_orgs
+verified_questions:
+  - 各机构还款总额

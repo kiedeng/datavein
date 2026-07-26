@@ -1,0 +1,17 @@
+metric: apply_cnt
+cn_name: 申请笔数
+caliber: 授信申请笔数,取 dws.dws_org_credit_day 机构日汇总。口径 owner:信贷域。
+version: 1
+base_table: dws.dws_org_credit_day
+expression: SUM(base.apply_cnt)
+dimensions:
+  org_no:
+    column: base.org_no
+  org_name:
+    column: base.org_name
+  dt:
+    column: base.dt
+default_filters: []
+row_policy: base.org_no IN :user_orgs
+verified_questions:
+  - 昨天各机构申请了多少笔
