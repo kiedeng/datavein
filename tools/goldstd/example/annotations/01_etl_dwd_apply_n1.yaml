@@ -1,0 +1,45 @@
+# ============================ 金标准标注文件(机器预填) ============================
+# 人工核对:确认无误改 verified: true,有错直接改数据(改完同样置 verified: true)。
+#   1. 对照同名 .sql 文件逐项检查 target_table / table_sources / column_edges;
+#   2. dst_col 以目标表 schema 的位置映射为准(Hive 语义,非 SELECT 别名);
+#   3. CTE / 子查询别名不是物理源表,table_sources 只留真实库表;
+#   4. expr 是表达式摘要,比对时做"归一化子串"匹配;拿不准可清空(留空=跳过表达式比对);
+#   5. machine_status: failed 且确认该 SQL 确实无法/不应解析(如 Hive 多表插入应拆分)时,
+#      保持 target_table: null 直接置 verified: true;若人工能标出真实血缘,请补全数据。
+# machine_* 字段是解析器原始输出快照,仅供参考,不参与比对。
+# ==================================================================================
+case_id: 01_etl_dwd_apply_n1
+sql_file: 01_etl_dwd_apply_n1.sql
+dialect: hive
+machine_status: success
+machine_reason: ''
+verified: true
+notes: ''
+target_table: dwd.dwd_apply_detail
+table_sources:
+- ods.ods_t_apply
+column_edges:
+- dst_col: apply_id
+  src_table: ods.ods_t_apply
+  src_col: apply_id
+  expr: t.apply_id AS apply_id
+- dst_col: cust_no
+  src_table: ods.ods_t_apply
+  src_col: cust_no
+  expr: t.cust_no AS cust_no
+- dst_col: prod_cd
+  src_table: ods.ods_t_apply
+  src_col: prod_cd
+  expr: t.prod_cd AS prod_cd
+- dst_col: apply_amt
+  src_table: ods.ods_t_apply
+  src_col: apply_amt
+  expr: t.apply_amt AS apply_amt
+- dst_col: apply_status
+  src_table: ods.ods_t_apply
+  src_col: apply_status
+  expr: t.apply_status AS apply_status
+- dst_col: apply_date
+  src_table: ods.ods_t_apply
+  src_col: apply_time
+  expr: TO_DATE(t.apply_time) AS biz_date
