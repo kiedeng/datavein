@@ -50,6 +50,8 @@ jobs:
         run: |
           pip install -e "./lineage-pipeline[dev]"
           pip install -e "./query-gateway[dev]"
+          pip install -e "./lineage-mcp-server"      # E2E 引用 server.repo(rapidfuzz 等)
+          pip install -e "./web-portal[dev]"
       - name: E2E on real MySQL (M1 全链路)
         env:
           DV_IT_MYSQL: "1"
@@ -65,3 +67,10 @@ jobs:
           MYSQL_USER: datavein
           MYSQL_PASSWORD: test_pw
         run: cd query-gateway && python -m pytest tests/integration -q
+      - name: Portal tests (对话降级/大盘/术语/补录)
+        env:
+          DV_IT_MYSQL: "1"
+          MYSQL_HOST: 127.0.0.1
+          MYSQL_USER: datavein
+          MYSQL_PASSWORD: test_pw
+        run: cd web-portal && python -m pytest tests -q
