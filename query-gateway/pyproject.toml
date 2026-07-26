@@ -17,5 +17,9 @@ dependencies = [
 [project.optional-dependencies]
 dev = ["pytest>=8.0", "httpx>=0.27"]
 
+[tool.setuptools]
+# metrics/ 是数据目录不是包,显式声明防 flat-layout 自动发现报错
+packages = ["gateway"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
