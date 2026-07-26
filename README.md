@@ -32,6 +32,13 @@ cd ../lineage-mcp-server && pip install -e .
 python -m server.app                   # streamable-http 起服务,Claude Code 即可接入
 ```
 
+## 生产部署
+
+生产部署(nginx TLS/token 前置 + mcp 双副本 + 健康检查 + 每日备份)见
+[deploy/docker-compose.prod.yml](./deploy/docker-compose.prod.yml),
+完整部署步骤、cron 调度、监控告警与故障处置见
+[docs/OPERATIONS.md](./docs/OPERATIONS.md)。
+
 ## 里程碑对应
 
 | 目录 | 里程碑 | 状态 |

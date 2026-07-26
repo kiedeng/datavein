@@ -3,16 +3,22 @@
 BFS 每层为一次 IN 批量点查(设计方案 2 章);一律带 visited 防环(5.4)。
 """
 
-from collections import deque
-
 import pymysql
+from dbutils.pooled_db import PooledDB
 
 from . import config
 
+_pool: PooledDB | None = None
+
 
 def connect():
-    return pymysql.connect(**config.MYSQL, autocommit=True,
-                           cursorclass=pymysql.cursors.DictCursor)
+    """池化连接(ping=1 取用前探活);服务只读,autocommit。"""
+    global _pool
+    if _pool is None:
+        _pool = PooledDB(creator=pymysql, maxconnections=config.DB_POOL_SIZE,
+                         blocking=True, ping=1, autocommit=True,
+                         cursorclass=pymysql.cursors.DictCursor, **config.MYSQL)
+    return _pool.connection()
 
 
 # ---------- 检索(6.1 三级匹配;L3 向量在 M2 接 Chroma) ----------

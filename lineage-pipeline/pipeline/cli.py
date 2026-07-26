@@ -17,6 +17,7 @@ def main():
     p_incr = sub.add_parser("incremental", help="单条 SQL 增量解析(发布钩子)")
     p_incr.add_argument("--sql-id", type=int, required=True)
     sub.add_parser("coverage", help="覆盖率大盘报表")
+    sub.add_parser("healthcheck", help="健康检查(cron 用,异常退出码非0触发告警)")
     args = ap.parse_args()
 
     from . import db, rebuild
@@ -37,6 +38,13 @@ def main():
     elif args.cmd == "coverage":
         from . import coverage
         print(json.dumps(coverage.report(db.connect()), ensure_ascii=False, default=str))
+    elif args.cmd == "healthcheck":
+        import sys
+
+        from . import health
+        report = health.check(db.connect())
+        print(json.dumps(report, ensure_ascii=False, default=str))
+        sys.exit(0 if report["healthy"] else 1)
 
 
 if __name__ == "__main__":

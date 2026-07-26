@@ -8,6 +8,8 @@ dependencies = [
     "sqlglot==26.16.4",
     "sqllineage>=1.5",       # 表级交叉校验(5.2)
     "pymysql>=1.1",
+    "DBUtils>=3.0",          # 连接池
+    "requests>=2.31",        # 调度平台 REST 适配
     "redis>=5.0",
 ]
 

@@ -5,16 +5,21 @@
 query_metric / run_adhoc_sql 为 M4 占位,内部将调 query-gateway。
 """
 
+import logging
+
 from fastmcp import FastMCP
 
 from . import config, repo
+from .cache import cached
+
+logging.basicConfig(level=logging.INFO,
+                    format="%(asctime)s %(levelname)s %(name)s %(message)s")
 
 mcp = FastMCP("lineage-mcp-server")
 
 
 def _conn():
-    # 骨架:每次新建连接;上线换连接池
-    return repo.connect()
+    return repo.connect()          # 池化连接,用完自动归还
 
 
 @mcp.tool
@@ -30,7 +35,9 @@ def get_lineage(full_name: str, column: str = "", direction: str = "upstream",
     """血缘遍历(S1)。默认表级聚合;字段级传 edge_level=column 并给 column。
     边内嵌 transform_expr/filter_cond(每跳怎么算的);confidence 低于 high 的跳
     在回答中必须提示用户核对(4.6)。depth 上限 5。"""
-    return repo.get_lineage(_conn(), full_name, column, direction, depth, edge_level)
+    args = (full_name, column, direction, depth, edge_level)
+    return cached("lineage", args,
+                  lambda: repo.get_lineage(_conn(), *args))
 
 
 @mcp.tool
@@ -46,7 +53,9 @@ def get_lineage_path(from_table: str, to_table: str) -> dict:
 def impact_analysis(full_name: str, group_by: str = "table",
                     page: int = 1, page_size: int = 100) -> dict:
     """影响分析(S2):闭包表一跳出全量下游,支持 group_by=task 按任务聚合与分页。"""
-    return repo.impact_analysis(_conn(), full_name, group_by, page, page_size)
+    args = (full_name, group_by, page, page_size)
+    return cached("impact", args,
+                  lambda: repo.impact_analysis(_conn(), *args))
 
 
 @mcp.tool

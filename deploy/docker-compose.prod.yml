@@ -1,0 +1,86 @@
+# 生产编排(设计方案 12 章):mcp 双副本无状态 + nginx 前置(TLS/token/负载均衡)
+# 用法:docker compose -f deploy/docker-compose.prod.yml --env-file .env up -d
+# MySQL 生产建议行内 RDS/主从实例,此处容器仅作无主从条件时的兜底,数据卷务必落持久盘。
+services:
+  mysql:
+    image: mysql:8.0
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DB}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_0900_ai_ci
+      - --ngram_token_size=2
+      - --innodb_buffer_pool_size=${MYSQL_BUFFER_POOL:-8G}
+      - --max_connections=500
+    volumes:
+      - ${DATA_DIR:-/data/datavein}/mysql:/var/lib/mysql
+      - ${BACKUP_DIR:-/data/datavein/backup}:/backup
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-p${MYSQL_ROOT_PASSWORD}"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    deploy:
+      resources:
+        limits: {memory: 12G}
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "2gb",
+              "--maxmemory-policy", "allkeys-lru"]
+    volumes:
+      - ${DATA_DIR:-/data/datavein}/redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+
+  chroma:
+    image: chromadb/chroma:latest
+    restart: unless-stopped
+    volumes:
+      - ${DATA_DIR:-/data/datavein}/chroma:/chroma/chroma
+    deploy:
+      resources:
+        limits: {memory: 8G}       # bge-base 768维 125万向量约4G,留余量
+
+  mcp-server-1: &mcp
+    build: ../lineage-mcp-server
+    restart: unless-stopped
+    env_file: ../.env
+    environment:
+      MYSQL_HOST: mysql
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      mysql: {condition: service_healthy}
+      redis: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import socket; socket.create_connection(('127.0.0.1', 8080), 3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+    deploy:
+      resources:
+        limits: {memory: 2G}
+
+  mcp-server-2:
+    <<: *mcp
+
+  nginx:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    environment:
+      MCP_AUTH_TOKEN: ${MCP_AUTH_TOKEN}
+    volumes:
+      - ./nginx/default.conf.template:/etc/nginx/templates/default.conf.template:ro
+      - ${TLS_CERT_DIR:-/data/datavein/tls}:/etc/nginx/tls:ro
+    ports:
+      - "443:443"
+    depends_on: [mcp-server-1, mcp-server-2]

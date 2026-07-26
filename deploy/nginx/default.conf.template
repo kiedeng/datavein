@@ -1,0 +1,37 @@
+# nginx 前置:TLS 终结 + Bearer token 校验 + 双副本负载均衡(设计方案 12 章)
+# token 校验在网关层完成,mcp 容器只暴露在内部网络。
+# 注意:此 token 仅是接入认证;数据权限在 query-gateway 编译期强制(11 章),与此无关。
+
+upstream mcp_backend {
+    server mcp-server-1:8080 max_fails=2 fail_timeout=10s;
+    server mcp-server-2:8080 max_fails=2 fail_timeout=10s;
+}
+
+map $http_authorization $mcp_auth_ok {
+    default                          0;
+    "Bearer ${MCP_AUTH_TOKEN}"       1;
+}
+
+server {
+    listen 443 ssl;
+    server_name lineage.internal;
+
+    ssl_certificate     /etc/nginx/tls/server.crt;   # 行内 CA 签发
+    ssl_certificate_key /etc/nginx/tls/server.key;
+    ssl_protocols       TLSv1.2 TLSv1.3;
+
+    # streamable-http 需要长连接与关闭缓冲
+    location /mcp {
+        if ($mcp_auth_ok = 0) { return 401; }
+        proxy_pass http://mcp_backend;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_buffering off;
+        proxy_read_timeout 300s;
+        client_max_body_size 1m;
+    }
+
+    location /healthz {
+        return 200 "ok";
+    }
+}
